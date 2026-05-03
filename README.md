@@ -4,6 +4,10 @@
 
 Download the HTML and click on it to run it in your favorite browser. It is a self-contained file.
 
+Preview, screenshot:
+
+![Screenshot](biodiverse-garden-game.png)
+
 Build your own rich ecosystem on a 24×24 grid. Plan habitats, place trees, water features, hedges and accessories, then watch a realistic food-web simulation calculate populations of over 35 species.
 
 Perfect for learning ecology, food chains, connectivity, and habitat requirements — all in one self-contained HTML file (no server, no install).
