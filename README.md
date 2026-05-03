@@ -2,7 +2,7 @@
 
 **An educational single-file HTML + JavaScript biodiversity planning game**
 
-Download the HTML and click on it to run it in your favorite browser. It is a self-contained file.
+Download the HTML or run it [here](./biodiverse-garden.html) and click on it to run it in your favorite browser. It is a self-contained file.
 
 Build your own rich ecosystem on a 24×24 grid. Plan habitats, place trees, water features, hedges and accessories, then watch a realistic food-web simulation calculate populations of over 35 species.
 
