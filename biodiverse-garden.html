@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Garden Architect - Planning Mode</title>
+    <style>
+        :root { --cell-size: 28px; --grid-dim: 24; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, sans-serif; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            background-color: #0d0d0d; 
+            margin: 0; 
+            padding: 20px; 
+            color: #e0e0e0; 
+        }
+        #game-container { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 15px; 
+            align-items: center; 
+            width: 100%; 
+            max-width: 1000px; 
+        }
+        
+        #garden-grid-container {
+            display: inline-block;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 10px 0;
+            scrollbar-width: thin;
+            scrollbar-color: #555 #222;
+        }
+        
+        #garden-grid { 
+            display: grid; 
+            grid-template-columns: repeat(var(--grid-dim), var(--cell-size)); 
+            grid-template-rows: repeat(var(--grid-dim), var(--cell-size)); 
+            border: 3px solid #333; 
+            background-color: #8bc34a; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); 
+            user-select: none; 
+            margin: 0 auto;
+        }
+
+        .cell { 
+            width: var(--cell-size); 
+            height: var(--cell-size); 
+            position: relative; 
+            outline: 1px solid rgba(0,0,0,0.05); 
+            cursor: crosshair; 
+        }
+        .layer { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            pointer-events: none; 
+        }
+        .layer svg { width: 100%; height: 100%; display: block; }
+
+        #ui-panel, #species-panel, #achievements-panel { 
+            background: #1a1a1a; 
+            padding: 20px; 
+            border-radius: 12px; 
+            width: 100%; 
+            border: 1px solid #333; 
+            box-sizing: border-box; 
+        }
+        .stats { display: flex; justify-content: space-around; background: #2e7d32; color: white; padding: 12px; border-radius: 8px; font-weight: bold; margin-bottom: 15px; }
+        
+        .controls-row { display: flex; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
+        .menu-group { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 150px; }
+        label { font-weight: bold; font-size: 0.75rem; color: #aaa; text-transform: uppercase; }
+        select { background: #262626; color: white; border: 1px solid #444; padding: 6px; border-radius: 4px; outline: none; }
+
+        #species-list { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); 
+            gap: 8px; 
+            margin-top: 10px; 
+        }
+        .species-tag { 
+            padding: 8px 12px; 
+            border-radius: 6px; 
+            font-size: 0.85rem; 
+            background: #252525; 
+            border-left: 4px solid #4caf50; 
+            display: flex; 
+            justify-content: space-between; 
+        }
+        .tag-predator { border-left-color: #ff9800; }
+
+        #achievements-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .achievement {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 14px;
+            background: #252525;
+            border-radius: 8px;
+            font-size: 0.92rem;
+            transition: all 0.2s;
+        }
+        .achievement.unlocked {
+            background: #1b5e20;
+            border: 1px solid #ffd700;
+            box-shadow: 0 0 12px rgba(255, 215, 0, 0.4);
+        }
+        .achievement .medal {
+            font-size: 1.6rem;
+            width: 36px;
+            text-align: center;
+        }
+        .achievement.locked .medal { filter: grayscale(1) brightness(0.7); }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <div id="ui-panel">
+        <div class="stats">
+            <span>BUDGET: €<span id="stat-budget">0</span></span>
+            <span>ECO-SCORE: <span id="stat-total">0</span></span>
+        </div>
+        <div class="controls-row">
+            <div class="menu-group"><label>Terrain</label><select id="sel-terrain" onchange="sync(this)"></select></div>
+            <div class="menu-group"><label>Nature</label><select id="sel-nature" onchange="sync(this)"><option value="">-- Select --</option></select></div>
+            <div class="menu-group"><label>Accessories</label><select id="sel-acc" onchange="sync(this)"><option value="">-- Select --</option></select></div>
+        </div>
+    </div>
+
+    <div id="garden-grid-container">
+        <div id="garden-grid" oncontextmenu="return false;"></div>
+    </div>
+
+    <div id="species-panel">
+        <label>Ecosystem Simulation</label>
+        <div id="species-list"></div>
+    </div>
+
+    <div id="achievements-panel">
+        <label>Achievements &amp; Milestones</label>
+        <div id="achievements-list"></div>
+    </div>
+</div>
+
+<script>
+    const INITIAL_BUDGET = 50000;
+    const GRID_DIM = 24;
+    const TOTAL_CELLS = GRID_DIM * GRID_DIM;
+
+    const ITEMS = {
+        "grass": { p: 0, icon: "#8bc34a", type: 'base', buyable: true },
+        "dirt": { p: 5, icon: "#a1887f", type: 'base', buyable: true },
+        "shallow-water": { p: 250, icon: "#81d4fa", type: 'base', isWater: true, buyable: true },
+        "deep-water": { p: 500, icon: "#0288d1", type: 'base', isWater: true, buyable: true },
+        "bog": { p: 200, icon: "#4a7c59", type: 'base', isWater: true, buyable: true },
+        "sand": { p: 5, icon: "#f4d9b0", type: 'base', buyable: true },
+        "dry-stone-wall": { p: 80, icon: "🧱", type: 'base', buyable: true },
+        "hedge": { p: 35, icon: "🌿", type: 'acc', buyable: true },
+        "tree": { p: 60, icon: "🌳", type: 'acc', buyable: true },
+        "orchard-tree": { p: 120, icon: "🍎", type: 'acc', buyable: true },
+        "old-tree": { p: 400, icon: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M50 90 L50 70 M40 90 L50 65 L60 90" stroke="#3e2723" stroke-width="8" fill="none"/><path d="M50 70 Q20 60 30 35 Q50 10 70 35 Q80 60 50 70" fill="#2e4d23" stroke="#1b2e15" stroke-width="2"/><circle cx="43" cy="40" r="2.5" fill="#111" opacity="0.6"/><circle cx="57" cy="40" r="2.5" fill="#111" opacity="0.6"/></svg>`, type: 'acc', buyable: false },
+        "wildflowers": { p: 10, icon: "🌸", type: 'acc', buyable: true },
+        "reeds": { p: 15, on: ["shallow-water", "bog"], icon: "🌾", type: 'acc', buyable: true },
+        "water-lillies": { p: 20, on: ["shallow-water", "deep-water"], icon: "🪷", type: 'acc', buyable: true },
+        "wood-pile": { p: 15, on: ["grass", "dirt", "shallow-water"], icon: "🪵", type: 'acc', buyable: true },
+        "stone-pile": { p: 15, on: ["grass", "dirt", "shallow-water"], icon: "🪨", type: 'acc', buyable: true },
+        "compost-heap": { p: 50, icon: "🍂", type: 'acc', buyable: true },
+        "insect-hotel": { p: 50, icon: "🏨", type: 'acc', buyable: true },
+        "hedgehog-box": { p: 45, icon: "🦔", type: 'acc', buyable: true },
+        "bird-box": { p: 25, icon: "🪺", type: 'acc', buyable: true },
+        "bat-box": { p: 35, icon: "🦇", type: 'acc', buyable: true },
+        "squirrel-box": { p: 50, icon: "🐿️", type: 'acc', buyable: true },
+        "artificial-reef": { p: 400, on: ["deep-water"], icon: "🐟", type: 'acc', buyable: true },
+        "waterfall": { p: 1500, on: ["shallow-water"], icon: "🌊", type: 'acc', buyable: true },
+        "stepping-stones": { p: 25, on: ["grass", "dirt", "sand", "shallow-water"], icon: `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="30" cy="30" r="18" fill="#777" stroke="#555" stroke-width="2"/><circle cx="70" cy="50" r="20" fill="#888" stroke="#666" stroke-width="2"/><circle cx="35" cy="75" r="16" fill="#666" stroke="#444" stroke-width="2"/></svg>`, type: 'acc', buyable: true }
+    };
+
+    const ECO_GRAPH = {
+        "Liverworts": { habitats: { "shallow-water": 0.1, "waterfall": 2, "old-tree": 0.1 }, boosters: { "bog": 0.1, "waterfall": 0.2 } },
+        "Mosses": { habitats: { "tree": 0.1, "grass": 0.01, "waterfall": 5, "old-tree": 0.1, "orchard-tree" : 1 }, boosters: { "shallow-water": 0.1, "waterfall": 0.2 } },
+        "Ferns": { habitats: { "tree": 0.05, "waterfall": 2, "old-tree": 0.25 }, boosters: { "shallow-water": 0.1, "waterfall": 0.5, "bog": 0.1, "pile-near-water": 0.5 } },
+        "Flies": { habitats: { "grass": 0.2, "dirt": 0.2, "deep-water": 0.5, "bog" : 0.5, "wildflowers": 0.5 }, boosters: { "shallow-water": 0.1, "compost-heap": 0.2 } },
+        "Solitary Bee": { habitats: { "wildflowers": 1, "insect-hotel": 1 } },
+        "Burrowing Solitary Bee": { habitats: { "wildflowers": 1, "dirt": 0.25} },
+        "Mouse": { habitats: { "grass": 0.1, "hedge": 0.2 } },
+        "Squirrel": { habitats: { "tree": 0.02, "old-tree": 0.25 }, virtuals: { "forest-unit": 0.05 }, boosters: { "orchard-tree": 0.1, "squirrel-box": 0.25 } },
+        "Rabbit": { habitats: { "grass": 0.05, "hedge": 0.05 }, boosters: { "orchard-tree": 0.1 } },
+        "Hare": { habitats: { "grass": 0.02 }, virtuals: { "forest-unit": 0.08 }, boosters: { "shallow-water": 0.1 } },
+        "Deer": { habitats: { "grass": 1, "tree": 1 }, virtuals: { "forest-unit": 0.1 }, boosters: { "shallow-water": 0.1 } },
+        "Boar": { habitats: { "grass": 1, "tree": 2, "dirt": 1 }, virtuals: { "forest-unit": 0.05 }, boosters: { "dirt": 0.5 } },
+        "Lizard": { habitats: { "dry-stone-wall": 0.5 }, foods: { "Flies": 0.5 }, boosters: { "compost-heap": 0.2 } },
+        "Hawk": { habitats: { "old-tree": 1, "tree": 1 }, foods: { "Hare": 1, "Lizard": 0.25, "Mouse": 0.1 } },
+        "Sphagnum Moss": { habitats: { "bog": 1 } },
+        "Carnivorous Plant": { habitats: { "bog": 0.5 }, foods: { "Flies": 0.5 } },
+        "Bog Turtle": { habitats: { "bog": 0.1 } },
+        "Mosquitos": { habitats: { "deep-water": 0.1, "shallow-water": 2, "bog": 2 } },
+        "Dragonfly": { habitats: { "shallow-water": 0.5, "bog": 0.5 }, foods: { "Mosquitos": 1 }, boosters: { "water-lillies": 1 } },
+        "Duck": { habitats: { "shallow-water": 0.25, "deep-water": 0.5 } },
+        "Frog": { habitats: { "shallow-water": 0.5, "bog": 0.5 }, virtuals: { "wetland-fragmentation": 0.8, "tree-in-water": 0.6 }, foods: { "Flies": 0.25, "Mosquitos": 0.25, "Dragonfly": 1 }, boosters: { "water-lillies": 1, "pile-near-water": 0.5 } },
+        "Salamander": { habitats: { "shallow-water": 1 }, virtuals: { "wetland-fragmentation": 1.2, "tree-in-water": 0.4 }, foods: { "Mosquitos": 0.2, "Flies": 0.2 } },
+        "Fish": { habitats: { "deep-water": 0.1, "shallow-water": 0.2 }, virtuals: { "wetland-unit": 0.15, "tree-in-water": 0.8 }, foods: { "Mosquitos": 0.5 }, boosters: { "artificial-reef": 2 } },
+        "Pike": { habitats: { "deep-water": 0.25 }, foods: { "Fish": 0.1 } },
+        "River Otter": { habitats: { "shallow-water": 0.25, "deep-water": 0.25 }, foods: { "Fish": 0.1 } },
+        "Kingfisher": { virtuals: { "tree-near-water": 1, "tree-in-water": 1.5 }, foods: { "Fish": 0.1 } },
+        "Reed Warbler": { habitats: { "reeds": 0.2 }, foods: { "Mosquitos": 0.5 } },
+        "Bittern": { habitats: { "reeds": 0.5 }, foods: { "Frog": 0.1, "Mosquitos": 0.01, "Dragonfly": 0.01 } },
+        "Great Egret": { habitats: { "shallow-water": 0.025 }, foods: { "Frog": 0.1, "Salamander": 0.2, "Dragonfly": 0.005 } },
+        "Grey Heron": { habitats: { "shallow-water": 0.05, "bog": 0.5, "reeds": 1 }, virtuals: { "shallow-water-edge": 0.1, "tree-in-water": 0.5 }, foods: { "Frog": 0.2, "Fish": 0.1 } },
+        "Hedgehog": { habitats: { "hedge": 1, "orchard-tree": 1 }, virtuals: { "connected-hedge": 0.125 }, boosters: { "wood-pile": 0.5, "hedgehog-box": 2, "orchard-tree": 1 } },
+        "Bat": { habitats: { "old-tree": 1, "bat-box": 1 }, foods: { "Mosquitos": 0.1, "Flies": 0.1 } },
+        "Carrion crow": { habitats: { "grass": 0.1 } },
+        "Tawny Owl": { habitats: { "old-tree": 1, "bird-box": 0.5 }, foods: { "Mouse": 0.1 }, boosters: { "orchard-tree": 0.1 } },
+        "Fox": { habitats: { "tree": 0.1, "old-tree": 0.1 }, foods: { "Mouse": 0.05, "Hare": 0.2, "Rabbit": 0.1, "Duck": 0.01 } },
+        "Wolf": { virtuals: { "forest-unit": 0.01 }, foods: { "Deer": 0.1, "Boar": 0.2, "River Otter": 0.01, "Duck": 0.01 } },
+
+        "Fungi": { habitats: { "forest-unit": 0.045, "wood-pile": 2.8 }, boosters: { "waterfall": 3.5 } },
+        "Dune Tiger Beetle": { habitats: { "sand": 1.2 } }
+    };
+
+    const ACHIEVEMENTS = [
+        { id: "fish-friendly", name: "Fish Friendly", desc: "≥ 5 Fish", medal: "🥈", check: (r) => (r.Fish || 0) >= 5 },
+        { id: "fish-paradise", name: "Fish Paradise", desc: "≥ 15 Fish", medal: "🏅", check: (r) => (r.Fish || 0) >= 15 },
+        { id: "bee-friendly", name: "Bee Friendly", desc: "≥ 20 Solitary Bees", medal: "🥉", check: (r) => (r["Solitary Bee"] || 0) >= 20 },
+        { id: "amphibian-paradise", name: "Amphibian Paradise", desc: "Frogs + Salamanders ≥ 25", medal: "🏅", check: (r) => (r.Frog || 0) + (r.Salamander || 0) >= 25 },
+        { id: "connected-forest", name: "Connected Forest!", desc: "Largest forest component > 40 cells", medal: "🏅", check: (r,v) => (v.forestUnit || 0) > 40 },
+        { id: "hedge-highway", name: "Hedgehog Highway", desc: "Strongly connected hedges", medal: "🥈", check: (r,v) => (v.connectedHedge || 0) > 90 },
+        { id: "hedgehog-paradise", name: "Hedgehog Paradise", desc: "≥ 12 Hedgehogs with good corridors", medal: "🏅", check: (r,v) => (r.Hedgehog || 0) >= 12 && (v.connectedHedge || 0) > 140 },
+        { id: "mosquito-free", name: "Mosquito Free Zone", desc: "0 Mosquitoes", medal: "🥉", check: (r) => (r.Mosquitos || 0) === 0 },
+        { id: "bat-haven", name: "Bat Haven", desc: "≥ 8 Bats", medal: "🥈", check: (r) => (r.Bat || 0) >= 8 },
+        { id: "bird-paradise", name: "Bird Paradise", desc: "Many birds ≥ 12", medal: "🏅", check: (r) => 
+            (r.Kingfisher || 0) + (r["Grey Heron"] || 0) + (r.Bittern || 0) + (r["Great Egret"] || 0) + (r["Tawny Owl"] || 0) >= 12 },
+        { id: "insect-hotel-full", name: "Insect Hotel Full", desc: "Flies + Dragonflies ≥ 40", medal: "🥉", check: (r) => (r.Flies || 0) + (r.Dragonfly || 0) >= 40 },
+        { id: "old-growth", name: "Old Growth Forest", desc: "≥ 5 Old Trees", medal: "🥉", check: (c) => (c["old-tree"] || 0) >= 5 },
+        { id: "stepping-stone-path", name: "Stepping Stone Explorer", desc: "≥ 15 Stepping Stones", medal: "🥉", check: (c) => (c["stepping-stones"] || 0) >= 15 },
+        { id: "biodiversity-master", name: "Biodiversity Master", desc: "All species present", medal: "🏅", check: (r) => {
+            return Object.keys(ECO_GRAPH).every(name => (r[name] || 0) > 0);
+        }}
+    ];
+
+    let currentBudget = INITIAL_BUDGET, activeSelection = "grass", isMouseDown = false, currentButton = -1;
+    let gridData = Array.from({ length: GRID_DIM }, () => Array.from({ length: GRID_DIM }, () => ["grass"]));
+
+    function isForestCell(cell) {
+        return cell.some(id => ["tree", "orchard-tree", "old-tree", "hedge"].includes(id));
+    }
+
+    function isWetlandCell(cell) {
+        const terrain = cell[0];
+        return ITEMS[terrain].isWater || cell.some(id => ["reeds", "water-lillies"].includes(id));
+    }
+
+    function getLargestComponent(isCellTypeFn) {
+        const visited = Array.from({ length: GRID_DIM }, () => Array.from({ length: GRID_DIM }, () => false));
+        let maxSize = 0;
+        const directions = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+
+        function floodFill(y, x) {
+            const stack = [[y, x]];
+            let size = 0;
+            while (stack.length) {
+                const [cy, cx] = stack.pop();
+                if (visited[cy][cx]) continue;
+                if (!isCellTypeFn(gridData[cy][cx])) continue;
+                visited[cy][cx] = true;
+                size++;
+                for (const [dy, dx] of directions) {
+                    const ny = cy + dy, nx = cx + dx;
+                    if (ny >= 0 && ny < GRID_DIM && nx >= 0 && nx < GRID_DIM && !visited[ny][nx]) {
+                        stack.push([ny, nx]);
+                    }
+                }
+            }
+            return size;
+        }
+
+        for (let y = 0; y < GRID_DIM; y++) {
+            for (let x = 0; x < GRID_DIM; x++) {
+                if (!visited[y][x] && isCellTypeFn(gridData[y][x])) {
+                    const size = floodFill(y, x);
+                    if (size > maxSize) maxSize = size;
+                }
+            }
+        }
+        return maxSize;
+    }
+
+    function getNumberOfWetlandComponents() {
+        const visited = Array.from({ length: GRID_DIM }, () => Array.from({ length: GRID_DIM }, () => false));
+        let count = 0;
+        const directions = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+
+        function floodFill(y, x) {
+            const stack = [[y, x]];
+            visited[y][x] = true;
+            while (stack.length) {
+                const [cy, cx] = stack.pop();
+                for (const [dy, dx] of directions) {
+                    const ny = cy + dy, nx = cx + dx;
+                    if (ny >= 0 && ny < GRID_DIM && nx >= 0 && nx < GRID_DIM && !visited[ny][nx] && isWetlandCell(gridData[ny][nx])) {
+                        visited[ny][nx] = true;
+                        stack.push([ny, nx]);
+                    }
+                }
+            }
+        }
+
+        for (let y = 0; y < GRID_DIM; y++) {
+            for (let x = 0; x < GRID_DIM; x++) {
+                if (!visited[y][x] && isWetlandCell(gridData[y][x])) {
+                    count++;
+                    floodFill(y, x);
+                }
+            }
+        }
+        return count;
+    }
+
+    function countItems() {
+        const c = {};
+        for (let y = 0; y < GRID_DIM; y++) {
+            for (let x = 0; x < GRID_DIM; x++) {
+                gridData[y][x].forEach(id => c[id] = (c[id] || 0) + 1);
+            }
+        }
+        return c;
+    }
+
+    function init() {
+        const sT = document.getElementById('sel-terrain'), sN = document.getElementById('sel-nature'), sA = document.getElementById('sel-acc');
+        for (let id in ITEMS) {
+            if (!ITEMS[id].buyable && id !== "grass") continue; 
+            const opt = new Option(`${id.replace('-',' ')} (€${ITEMS[id].p})`, id);
+            if (["grass", "dirt", "shallow-water", "deep-water", "bog", "sand", "dry-stone-wall"].includes(id)) sT.add(opt);
+            else if (["tree", "orchard-tree", "hedge", "reeds", "wildflowers", "water-lillies"].includes(id)) sN.add(opt);
+            else sA.add(opt);
+        }
+
+        const gDiv = document.getElementById('garden-grid');
+        for (let y = 0; y < GRID_DIM; y++) {
+            for (let x = 0; x < GRID_DIM; x++) {
+                const c = document.createElement('div'); c.className = 'cell'; c.dataset.x = x; c.dataset.y = y;
+                c.addEventListener('mousedown', e => act(x, y, e.button));
+                c.addEventListener('touchstart', e => {
+                    const timer = setTimeout(() => act(x, y, 2), 600);
+                    c.dataset.longPressTimer = timer;
+                });
+                c.addEventListener('touchend', () => {
+                    if (c.dataset.longPressTimer) {
+                        clearTimeout(parseInt(c.dataset.longPressTimer));
+                        delete c.dataset.longPressTimer;
+                    }
+                });
+                c.addEventListener('mouseenter', e => { if (isMouseDown) act(x, y, currentButton); });
+                gDiv.appendChild(c);
+            }
+        }
+        
+        for(let i=0; i<5; i++) gridData[Math.floor(Math.random()*GRID_DIM)][Math.floor(Math.random()*GRID_DIM)].push("stone-pile");
+        for(let i=0; i<3; i++) gridData[Math.floor(Math.random()*GRID_DIM)][Math.floor(Math.random()*GRID_DIM)].push("hedge");
+        for(let i=0; i<9; i++) gridData[Math.floor(Math.random()*GRID_DIM)][Math.floor(Math.random()*GRID_DIM)].push("tree");
+        for(let i=0; i<3; i++) gridData[Math.floor(Math.random()*GRID_DIM)][Math.floor(Math.random()*GRID_DIM)].push("old-tree");
+
+        window.addEventListener('mousedown', e => { isMouseDown = true; currentButton = e.button; });
+        window.addEventListener('mouseup', () => isMouseDown = false);
+        window.addEventListener('contextmenu', e => e.preventDefault());
+        renderAll(); update();
+    }
+
+    function sync(el) { 
+        activeSelection = el.value; 
+        ["sel-terrain", "sel-nature", "sel-acc"].forEach(id => { 
+            if(document.getElementById(id) !== el) document.getElementById(id).selectedIndex = 0; 
+        }); 
+    }
+
+    function isValid(itemId, cell) {
+        const terrain = cell[0];
+        const hasAccessory = cell.length > 1;
+        const item = ITEMS[itemId];
+        if (!item) return false;
+
+        if (item.type === 'base') {
+            return !hasAccessory;
+        }
+
+        if (hasAccessory) return false;
+
+        if (["orchard-tree", "old-tree"].includes(itemId) && ITEMS[terrain].isWater) return false;
+        if (itemId === "orchard-tree" && ["hedge", "stone-pile"].includes(terrain)) return false;
+
+        if (itemId === "tree" && terrain === "shallow-water") return true;
+
+        if (itemId === "stepping-stones") {
+            return ["grass", "dirt", "sand", "shallow-water"].includes(terrain);
+        }
+
+        if (item.on) return item.on.includes(terrain);
+
+        return !ITEMS[terrain].isWater;
+    }
+
+    function act(x, y, btn) {
+        let s = gridData[y][x]; 
+        const selectedItem = ITEMS[activeSelection];
+        
+        if (btn === 0) {
+            if (activeSelection === "grass") {
+                while (s.length > 1) {
+                    const removed = s.pop();
+                    currentBudget += ITEMS[removed].p;
+                }
+                if (s[0] !== "grass") {
+                    currentBudget += ITEMS[s[0]].p;
+                    s[0] = "grass";
+                }
+            } else if (selectedItem.type === 'base') {
+                if (s[0] !== activeSelection) {
+                    currentBudget += ITEMS[s[0]].p;
+                    if (currentBudget - selectedItem.p >= 0 && isValid(activeSelection, s)) {
+                        currentBudget -= selectedItem.p;
+                        s[0] = activeSelection;
+                    } else {
+                        currentBudget -= ITEMS[s[0]].p;
+                    }
+                }
+            } else if (selectedItem.buyable) {
+                if (isValid(activeSelection, s)) {
+                    if (currentBudget - selectedItem.p >= 0) {
+                        s.push(activeSelection);
+                        currentBudget -= selectedItem.p;
+                    }
+                }
+            }
+        } else if (btn === 2) {
+            if (s.length > 1) {
+                const removedId = s.pop();
+                currentBudget += ITEMS[removedId].p;
+            } else if (s[0] !== "grass") {
+                currentBudget += ITEMS[s[0]].p;
+                s[0] = "grass";
+            }
+        }
+        renderCell(x, y); update();
+    }
+
+    function renderCell(x, y) {
+        const d = document.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`), s = gridData[y][x];
+        d.innerHTML = '';
+        d.style.backgroundColor = ITEMS[s[0]].icon.startsWith('#') ? ITEMS[s[0]].icon : "#8bc34a";
+        s.forEach((id, i) => { 
+            if (i === 0 && ITEMS[id].icon.startsWith('#')) return;
+            const l = document.createElement('div'); l.className = 'layer';
+            l.innerHTML = ITEMS[id].icon.includes('<svg') ? ITEMS[id].icon : `<span>${ITEMS[id].icon}</span>`;
+            d.appendChild(l);
+        });
+    }
+
+    function renderAll() { 
+        for(let y=0; y<GRID_DIM; y++) 
+            for(let x=0; x<GRID_DIM; x++) 
+                renderCell(x,y); 
+    }
+
+    function update() {
+        const counts = {};
+        const virtual = { 
+            "tree-near-water": 0, "shallow-water-edge": 0, "connected-hedge": 0, 
+            "pile-near-water": 0, "forest-unit": 0, "wetland-unit": 0, 
+            "wetland-fragmentation": 0, "tree-in-water": 0 
+        };
+        const results = {};
+        const itemCounts = countItems();
+
+        for (let y = 0; y < GRID_DIM; y++) {
+            for (let x = 0; x < GRID_DIM; x++) {
+                const cell = gridData[y][x];
+                const terrain = cell[0];
+
+                if (terrain === "shallow-water") {
+                    [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dy, dx]) => {
+                        const ny = y+dy, nx = x+dx;
+                        if (ny >= 0 && ny < GRID_DIM && nx >= 0 && nx < GRID_DIM && !ITEMS[gridData[ny][nx][0]].isWater) 
+                            virtual["shallow-water-edge"]++;
+                    });
+                }
+
+                let hasTree = false;
+                cell.forEach(id => {
+                    counts[id] = (counts[id] || 0) + 1;
+                    if (["tree","orchard-tree","old-tree"].includes(id)) hasTree = true;
+                    if (id === "hedge") {
+                        if (x < GRID_DIM-1 && gridData[y][x+1].includes("hedge")) virtual["connected-hedge"]++;
+                        if (y < GRID_DIM-1 && gridData[y+1][x].includes("hedge")) virtual["connected-hedge"]++;
+                    }
+                    if (["tree","orchard-tree","old-tree"].includes(id)) {
+                        let nearW = false;
+                        for (let dy=-1; dy<=1; dy++) for (let dx=-1; dx<=1; dx++) {
+                            const ny=y+dy, nx=x+dx;
+                            if (ny>=0&&ny<GRID_DIM&&nx>=0&&nx<GRID_DIM && ITEMS[gridData[ny][nx][0]].isWater) nearW = true;
+                        }
+                        if (nearW) virtual["tree-near-water"]++;
+                    }
+                    if (["wood-pile","stone-pile"].includes(id)) {
+                        let nearW = false;
+                        [[0,1],[0,-1],[1,0],[-1,0]].forEach(([dy,dx]) => {
+                            const ny=y+dy, nx=x+dx;
+                            if (ny>=0&&ny<GRID_DIM&&nx>=0&&nx<GRID_DIM && ITEMS[gridData[ny][nx][0]].isWater) nearW=true;
+                        });
+                        if (nearW) virtual["pile-near-water"]++;
+                    }
+                });
+
+                if (hasTree && terrain === "shallow-water") {
+                    virtual["tree-in-water"]++;
+                }
+            }
+        }
+
+        virtual["forest-unit"] = getLargestComponent(isForestCell);
+        virtual["wetland-unit"] = getLargestComponent(isWetlandCell);
+        virtual["wetland-fragmentation"] = getNumberOfWetlandComponents();
+
+        const speciesKeys = Object.keys(ECO_GRAPH);
+        const resolvedOrder = [];
+        const seen = new Set();
+
+        function resolve(name) {
+            if (seen.has(name)) return;
+            if (ECO_GRAPH[name].foods) Object.keys(ECO_GRAPH[name].foods).forEach(prey => resolve(prey));
+            resolvedOrder.push(name);
+            seen.add(name);
+        }
+        speciesKeys.forEach(resolve);
+
+        resolvedOrder.forEach(name => {
+            const node = ECO_GRAPH[name];
+            let habitatCap = node.habitats ? Object.entries(node.habitats).reduce((sum,[id,val]) => sum + (counts[id]||0)*val, 0) : Infinity;
+            let virtualCap = node.virtuals ? Object.entries(node.virtuals).reduce((min,[id,val]) => Math.min(min, (virtual[id]||0)*val), Infinity) : Infinity;
+            let boosterCap = node.boosters ? Object.entries(node.boosters).reduce((sum,[id,val]) => sum + (counts[id]||0)*val, 0) : 0;
+
+            let totalCap = Math.floor(Math.min(habitatCap, virtualCap) + boosterCap);
+            if (totalCap === Infinity) totalCap = 0;
+
+            if (node.foods) {
+                let foodTotal = Object.entries(node.foods).reduce((sum,[prey,val]) => sum + (results[prey]||0)*val, 0);
+                results[name] = Math.floor(Math.min(totalCap, foodTotal));
+            } else {
+                results[name] = totalCap;
+            }
+        });
+
+        if (results.Mosquitos !== undefined) {
+            let red = (results.Fish||0)*0.8 + (results.Bat||0)*0.4 + (results.Dragonfly||0)*0.3 +
+                      (results.Frog||0)*0.25 + (results.Kingfisher||0)*0.15 + (results["Grey Heron"]||0)*0.1 +
+                      (results.Bittern||0)*0.08 + (results["Great Egret"]||0)*0.05 + (results["Tawny Owl"]||0)*0.03;
+            results.Mosquitos = Math.max(0, Math.floor(results.Mosquitos - red));
+        }
+
+        const listDiv = document.getElementById('species-list');
+        listDiv.innerHTML = "";
+        let totalScore = 0;
+        resolvedOrder.forEach(name => {
+            if (results[name] > 0) {
+                totalScore += results[name] * 20;
+                const tag = document.createElement('div');
+                tag.className = `species-tag ${ECO_GRAPH[name].foods ? 'tag-predator' : ''}`;
+                tag.innerHTML = `<span>${name}</span> <strong>${results[name]}</strong>`;
+                listDiv.appendChild(tag);
+            }
+        });
+
+        const achDiv = document.getElementById('achievements-list');
+        achDiv.innerHTML = "";
+        ACHIEVEMENTS.forEach(ach => {
+            const isUnlocked = ach.check(results, virtual, itemCounts);
+            const el = document.createElement('div');
+            el.className = `achievement ${isUnlocked ? 'unlocked' : 'locked'}`;
+            el.innerHTML = `
+                <span class="medal">${ach.medal}</span>
+                <div style="flex:1">
+                    <strong>${ach.name}</strong><br>
+                    <small>${ach.desc}</small>
+                    ${ach.id === "connected-forest" ? `<br><small style="color:#aaa">Current forest size: ${virtual.forestUnit || 0}</small>` : ''}
+                </div>
+            `;
+            achDiv.appendChild(el);
+        });
+
+        document.getElementById('stat-budget').innerText = Math.round(currentBudget);
+        document.getElementById('stat-total').innerText = totalScore;
+    }
+
+    init();
+</script>
+</body>
+</html>
